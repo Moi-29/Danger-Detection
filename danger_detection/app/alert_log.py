@@ -68,5 +68,12 @@ class AlertLog:
         # newest first
         return [e.to_json() for e in reversed(items)]
 
+    def clear(self) -> int:
+        """Remove all entries. Returns how many were cleared."""
+        with self._lock:
+            n = len(self._entries)
+            self._entries.clear()
+            return n
+
 
 alert_log = AlertLog()

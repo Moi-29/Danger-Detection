@@ -53,6 +53,18 @@ async function fetchEventLog(limit = 40): Promise<LogEvent[]> {
   return data.events ?? []
 }
 
+async function clearEventLog(): Promise<void> {
+  const base = apiBase()
+  // POST avoids 405 from some PWA service workers / static hosts that mishandle DELETE.
+  const res = await fetch(`${base}/api/events/clear`, {
+    method: 'POST',
+    headers: { Accept: 'application/json' },
+  })
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`)
+  }
+}
+
 function loadBool(key: string, defaultVal: boolean): boolean {
   try {
     const v = localStorage.getItem(key)
@@ -119,6 +131,71 @@ function IconSettings() {
   )
 }
 
+function IconRefresh({ spinning }: { spinning?: boolean }) {
+  return (
+    <svg
+      className={`alerts-refresh-icon ${spinning ? 'alerts-refresh-icon--spin' : ''}`}
+      viewBox="0 0 24 24"
+      width="18"
+      height="18"
+      aria-hidden="true"
+    >
+      <path
+        fill="currentColor"
+        d="M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"
+      />
+    </svg>
+  )
+}
+
+function IconEmptyCalm() {
+  return (
+    <svg
+      className="alerts-empty__svg"
+      viewBox="0 0 80 80"
+      aria-hidden="true"
+    >
+      <circle
+        cx="40"
+        cy="40"
+        r="34"
+        fill="none"
+        stroke="rgba(31, 107, 58, 0.35)"
+        strokeWidth="2"
+      />
+      <path
+        fill="none"
+        stroke="rgba(143, 212, 164, 0.75)"
+        strokeWidth="3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M24 42l12 12 20-22"
+      />
+    </svg>
+  )
+}
+
+function formatLogTime(iso: string): string {
+  try {
+    const d = new Date(iso)
+    if (Number.isNaN(d.getTime())) {
+      return iso
+    }
+    return d.toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    })
+  } catch {
+    return iso
+  }
+}
+
+function formatSourceLabel(source: string): string {
+  return source.replace(/_/g, ' ')
+}
+
 export default function App() {
   const [screen, setScreen] = useState<Screen>('alerts')
   const [soundEnabled, setSoundEnabled] = useState(() =>
@@ -136,6 +213,8 @@ export default function App() {
   const [error, setError] = useState<string | null>(null)
   const [logError, setLogError] = useState<string | null>(null)
   const [events, setEvents] = useState<LogEvent[]>([])
+  const [logRefreshing, setLogRefreshing] = useState(false)
+  const [clearingLog, setClearingLog] = useState(false)
   const [urgent, setUrgent] = useState<{
     fire: number
     smoke: number
@@ -143,7 +222,7 @@ export default function App() {
 
   const dismissUrgent = useCallback(() => setUrgent(null), [])
 
-  const refreshLog = useCallback(async () => {
+  const fetchLog = useCallback(async () => {
     try {
       const list = await fetchEventLog()
       setEvents(list)
@@ -153,11 +232,42 @@ export default function App() {
     }
   }, [])
 
+  const refreshLog = useCallback(async () => {
+    setLogRefreshing(true)
+    try {
+      await fetchLog()
+    } finally {
+      setLogRefreshing(false)
+    }
+  }, [fetchLog])
+
+  const clearHistory = useCallback(async () => {
+    if (events.length === 0) {
+      return
+    }
+    const ok = window.confirm(
+      'Clear all hazard entries from this list? This removes them on the server for everyone using this alert service.',
+    )
+    if (!ok) {
+      return
+    }
+    setClearingLog(true)
+    try {
+      await clearEventLog()
+      setEvents([])
+      setLogError(null)
+    } catch {
+      setLogError('Could not clear the detection log.')
+    } finally {
+      setClearingLog(false)
+    }
+  }, [events.length])
+
   useEffect(() => {
-    void refreshLog()
-    const id = window.setInterval(() => void refreshLog(), 12_000)
+    void fetchLog()
+    const id = window.setInterval(() => void fetchLog(), 12_000)
     return () => window.clearInterval(id)
-  }, [refreshLog])
+  }, [fetchLog])
 
   useEffect(() => {
     saveBool(STORAGE_SOUND, soundEnabled)
@@ -201,14 +311,14 @@ export default function App() {
         if (soundRef.current) {
           playUrgentTone()
         }
-        void refreshLog()
+        void fetchLog()
       }
     }
 
     return () => {
       ws.close()
     }
-  }, [refreshLog])
+  }, [fetchLog])
 
   const urgentKind =
     urgent && urgent.fire > 0 && urgent.smoke > 0
@@ -257,68 +367,151 @@ export default function App() {
 
       <div className="shell__main">
         {screen === 'alerts' && (
-          <main className="screen" id="main" aria-labelledby="alerts-heading">
-            <header className="screen__header">
-              <h1 id="alerts-heading" className="screen__title">
-                Alerts
-              </h1>
-              <p className="screen__lede">
-                Live fire and smoke detections from the monitoring app.
-              </p>
+          <main
+            className="screen screen--alerts"
+            id="main"
+            aria-labelledby="alerts-heading"
+          >
+            <header className="alerts-top">
+              <div className="alerts-top__intro">
+                <h1 id="alerts-heading" className="screen__title">
+                  Alerts
+                </h1>
+                <p className="screen__lede">
+                  Fire and smoke events from the desktop monitor, with instant
+                  push when you keep this page open.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn btn--alerts-refresh"
+                onClick={() => void refreshLog()}
+                disabled={logRefreshing}
+                aria-busy={logRefreshing}
+                aria-label="Refresh detection log"
+              >
+                <IconRefresh spinning={logRefreshing} />
+                <span>Refresh</span>
+              </button>
             </header>
 
-            <div className="status-row" aria-live="polite">
-              <span
-                className={`pill ${connected ? 'pill--ok' : 'pill--warn'}`}
-                title="Live alert channel"
-              >
-                {connected ? '● Live' : '○ Connecting'}
-              </span>
+            <div
+              className={`alerts-live ${connected ? 'alerts-live--on' : ''}`}
+              aria-live="polite"
+            >
+              <div className="alerts-live__row">
+                <span
+                  className="alerts-live__dot"
+                  aria-hidden="true"
+                  data-on={connected}
+                />
+                <div className="alerts-live__text">
+                  <span className="alerts-live__label">Live channel</span>
+                  <span className="alerts-live__state">
+                    {connected
+                      ? 'Connected — new hazards appear here immediately'
+                      : 'Connecting to alert service…'}
+                  </span>
+                </div>
+              </div>
             </div>
 
             {error && (
-              <p className="banner banner--error" role="alert">
+              <p className="banner banner--error alerts-banner" role="alert">
                 {error}
               </p>
             )}
 
-            <section className="card" aria-labelledby="log-heading">
-              <h2 id="log-heading" className="card__title">
-                Detection log
-              </h2>
-              {logError && (
-                <p className="hint" role="status">
-                  {logError}
-                </p>
-              )}
-              {events.length === 0 && !logError ? (
-                <p className="log-empty">
-                  No hazard entries yet. When the desktop app sees fire or
-                  smoke, they appear here.
-                </p>
-              ) : (
-                <ul className="log-list">
-                  {events.map((e, i) => (
-                    <li
-                      key={`${e.ts}-${i}-${e.summary}`}
-                      className="log-item"
-                    >
-                      <time dateTime={e.iso}>
-                        {e.iso.replace('T', ' ').replace('Z', ' UTC')}
-                      </time>
-                      <strong>{e.summary}</strong>
-                      <span>({e.source.replace('_', ' ')})</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
+            <section
+              className="alerts-log-block"
+              aria-labelledby="log-heading"
+            >
+              <div className="alerts-log-block__head">
+                <h2 id="log-heading" className="alerts-log-block__title">
+                  Recent activity
+                </h2>
+                <div className="alerts-log-block__toolbar">
+                  <span className="alerts-log-block__count" aria-live="polite">
+                    {events.length === 0
+                      ? 'No entries'
+                      : `${events.length} ${events.length === 1 ? 'entry' : 'entries'}`}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn--clear-history"
+                    onClick={() => void clearHistory()}
+                    disabled={events.length === 0 || clearingLog}
+                    aria-busy={clearingLog}
+                    title="Remove all entries from the server log"
+                  >
+                    Clear list
+                  </button>
+                </div>
+              </div>
+
+              <div className="alerts-log-block__body">
+                {logError && (
+                  <p className="alerts-log-error" role="status">
+                    {logError}
+                  </p>
+                )}
+                {events.length > 0 && (
+                  <ul className="alerts-log-list">
+                    {events.map((e, i) => (
+                      <li
+                        key={`${e.ts}-${i}-${e.summary}`}
+                        className="alerts-log-entry"
+                      >
+                        <div className="alerts-log-entry__meta">
+                          <time
+                            className="alerts-log-entry__time"
+                            dateTime={e.iso}
+                          >
+                            {formatLogTime(e.iso)}
+                          </time>
+                          <span className="alerts-log-entry__source">
+                            {formatSourceLabel(e.source)}
+                          </span>
+                        </div>
+                        <p className="alerts-log-entry__summary">{e.summary}</p>
+                        {(e.fire > 0 || e.smoke > 0) && (
+                          <div className="alerts-log-entry__chips">
+                            {e.fire > 0 && (
+                              <span className="chip chip--fire">
+                                Fire ×{e.fire}
+                              </span>
+                            )}
+                            {e.smoke > 0 && (
+                              <span className="chip chip--smoke">
+                                Smoke ×{e.smoke}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {events.length === 0 && !logError && (
+                  <div className="alerts-empty">
+                    <IconEmptyCalm />
+                    <h3 className="alerts-empty__title">No hazards logged yet</h3>
+                    <p className="alerts-empty__text">
+                      When the monitoring app detects fire or smoke, each event
+                      shows up here with a timestamp and source.
+                    </p>
+                  </div>
+                )}
+              </div>
             </section>
 
             {connected && !error && (
-              <p className="hint hint--footer">
-                Keep this page open or install it. New alerts arrive instantly
-                over the live connection.
-              </p>
+              <footer className="alerts-footer">
+                <p className="alerts-footer__text">
+                  Tip: add this app to your home screen for quicker access. The
+                  log also refreshes in the background about every 12 seconds.
+                </p>
+              </footer>
             )}
           </main>
         )}

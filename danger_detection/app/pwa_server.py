@@ -134,6 +134,27 @@ def health() -> Dict[str, str]:
     return {"status": "ok"}
 
 
+@app.delete("/api/events")
+def clear_detection_events_delete() -> Dict[str, Any]:
+    """
+    Clear the in-memory hazard log (REST). Prefer POST /api/events/clear from the
+    web app — some proxies and service workers mishandle DELETE on the same path
+    as GET.
+    """
+    cleared = alert_log.clear()
+    return {"ok": True, "cleared": cleared}
+
+
+@app.post("/api/events/clear")
+def clear_detection_events_post() -> Dict[str, Any]:
+    """
+    Clear the in-memory hazard log. Used by the PWA (POST avoids 405 from some
+    static / SW setups).
+    """
+    cleared = alert_log.clear()
+    return {"ok": True, "cleared": cleared}
+
+
 @app.get("/api/events")
 def list_detection_events(limit: int = 50) -> Dict[str, Any]:
     """

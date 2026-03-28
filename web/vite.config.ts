@@ -29,6 +29,15 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,svg,png,woff2}'],
+        // Do not treat API / WebSocket paths as SPA navigations; always hit network for API.
+        navigateFallbackDenylist: [/^\/api\//, /^\/ws$/],
+        runtimeCaching: [
+          {
+            urlPattern: ({ url }) =>
+              url.pathname.startsWith('/api/') || url.pathname === '/ws',
+            handler: 'NetworkOnly',
+          },
+        ],
       },
     }),
   ],
