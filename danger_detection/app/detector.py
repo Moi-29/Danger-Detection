@@ -11,8 +11,9 @@ import threading
 import queue
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+import time
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -102,10 +103,15 @@ class FireSmokeDetector:
         model_path: Optional[Path] = None,
         camera_index: int = 0,
         conf_threshold: float = 0.35,
+        on_alert: Optional[Callable[[int, int], None]] = None,
+        alert_debounce_s: float = 0.45,
     ) -> None:
         self.model_path = Path(model_path or resolve_model_path())
         self.camera_index = camera_index
         self.conf_threshold = conf_threshold
+        self._on_alert = on_alert
+        self._alert_debounce_s = alert_debounce_s
+        self._last_alert_mono: float = 0.0
 
         self._model: Optional[YOLO] = None
         self._cap: Optional[cv2.VideoCapture] = None
@@ -207,6 +213,11 @@ class FireSmokeDetector:
                 fire_count=fc,
                 smoke_count=sc,
             )
+            if self._on_alert and (fc > 0 or sc > 0):
+                now = time.monotonic()
+                if now - self._last_alert_mono >= self._alert_debounce_s:
+                    self._last_alert_mono = now
+                    self._on_alert(fc, sc)
             try:
                 self._queue.put_nowait(packet)
             except queue.Full:
