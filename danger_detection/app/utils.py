@@ -64,6 +64,16 @@ def default_model_path() -> Path:
     return resolve_model_path()
 
 
+def default_coco_person_model_path() -> Path:
+    """COCO YOLOv8n for class 0 (person) — separate from fire/smoke fine-tuned weights."""
+    return package_root() / "models" / "yolov8n.pt"
+
+
+def default_db_path() -> Path:
+    """SQLite audit database (object detections + flow events)."""
+    return package_root() / "data" / "danger_detection.db"
+
+
 def resize_to_fit(
     frame_bgr: np.ndarray,
     max_w: int,

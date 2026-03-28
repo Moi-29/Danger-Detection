@@ -1,0 +1,15 @@
+app/models/yolov8n.pt
+/venv/
+/danger_detection/models/yolov8n.pt
+/danger_detection/models/firesmoke.pt
+
+# Local SQLite audit DB (optional; remove line to track a small dev DB)
+danger_detection/data/*.db
+danger_detection/data/*.db-journal
+danger_detection/data/*.db-wal
+danger_detection/data/*.db-shm
+__pycache__/
+danger_detection/models/fire_smoke.pt
+danger_detection/models/fire_smoke.pt
+__pycache__/
+venv/

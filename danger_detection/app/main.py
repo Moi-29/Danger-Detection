@@ -10,6 +10,7 @@ from typing import Optional
 
 from PIL import Image, ImageTk
 
+from danger_detection.app.alert_notify import push_alert_to_pwa
 from danger_detection.app.detector import FireSmokeDetector, FramePacket
 from danger_detection.app.utils import bgr_to_rgb, resize_to_fit
 
@@ -22,7 +23,7 @@ class DangerDetectionApp:
         self.root.title("Danger Detection — Fire & Smoke")
         self.root.minsize(640, 480)
 
-        self.detector = FireSmokeDetector()
+        self.detector = FireSmokeDetector(on_alert=push_alert_to_pwa)
         self._photo: Optional[ImageTk.PhotoImage] = None
         self._poll_job: Optional[str] = None
 

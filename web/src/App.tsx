@@ -2,7 +2,27 @@ import { useCallback, useEffect, useState } from 'react'
 
 type WsMessage =
   | { type: 'hello'; message: string }
-  | { type: 'alert'; fire: number; smoke: number; ts: number }
+  | { type: 'alert'; fire: number; smoke: number; ts: number; source?: string }
+
+type LogEvent = {
+  ts: number
+  iso: string
+  fire: number
+  smoke: number
+  source: string
+  summary: string
+}
+
+function apiBase(): string {
+  const b = import.meta.env.VITE_API_BASE as string | undefined
+  if (b) {
+    return b.replace(/\/$/, '')
+  }
+  if (import.meta.env.DEV) {
+    return 'http://localhost:8000'
+  }
+  return ''
+}
 
 function buildWsUrl(): string {
   const explicit = import.meta.env.VITE_WS_URL as string | undefined
@@ -16,6 +36,16 @@ function buildWsUrl(): string {
     return `${wsProto}//${hostname}:8000/ws`
   }
   return `${wsProto}//${window.location.host}/ws`
+}
+
+async function fetchEventLog(limit = 40): Promise<LogEvent[]> {
+  const base = apiBase()
+  const res = await fetch(`${base}/api/events?limit=${limit}`)
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`)
+  }
+  const data = (await res.json()) as { events: LogEvent[] }
+  return data.events ?? []
 }
 
 function playUrgentTone(): void {
@@ -45,12 +75,30 @@ function vibrateUrgent(): void {
 export default function App() {
   const [connected, setConnected] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [logError, setLogError] = useState<string | null>(null)
+  const [events, setEvents] = useState<LogEvent[]>([])
   const [urgent, setUrgent] = useState<{
     fire: number
     smoke: number
   } | null>(null)
 
   const dismissUrgent = useCallback(() => setUrgent(null), [])
+
+  const refreshLog = useCallback(async () => {
+    try {
+      const list = await fetchEventLog()
+      setEvents(list)
+      setLogError(null)
+    } catch {
+      setLogError('Could not load the detection log.')
+    }
+  }, [])
+
+  useEffect(() => {
+    void refreshLog()
+    const id = window.setInterval(() => void refreshLog(), 12_000)
+    return () => window.clearInterval(id)
+  }, [refreshLog])
 
   useEffect(() => {
     const url = buildWsUrl()
@@ -82,13 +130,14 @@ export default function App() {
         setUrgent({ fire: data.fire, smoke: data.smoke })
         vibrateUrgent()
         playUrgentTone()
+        void refreshLog()
       }
     }
 
     return () => {
       ws.close()
     }
-  }, [])
+  }, [refreshLog])
 
   const urgentKind =
     urgent && urgent.fire > 0 && urgent.smoke > 0
@@ -104,17 +153,17 @@ export default function App() {
       <header className="app__header">
         <h1 className="app__title">Safety alerts</h1>
         <p className="app__subtitle">
-          Official hazard notifications for your area. Add this page to your
-          home screen to get alerts like an app.
+          The desktop monitoring app detects fire and smoke. This page loads the
+          shared log and shows an urgent notice when a new hazard is reported.
         </p>
       </header>
 
       <div className="status-row" aria-live="polite">
         <span
           className={`pill ${connected ? 'pill--ok' : 'pill--warn'}`}
-          title="Link to notification service"
+          title="Live alert channel"
         >
-          {connected ? '● Subscribed to alerts' : '○ Connecting…'}
+          {connected ? '● Live alerts connected' : '○ Connecting…'}
         </span>
       </div>
 
@@ -124,11 +173,35 @@ export default function App() {
         </p>
       )}
 
+      <section className="log-section" aria-labelledby="log-heading">
+        <h2 id="log-heading">Detection log</h2>
+        {logError && (
+          <p className="hint" role="status">
+            {logError}
+          </p>
+        )}
+        {events.length === 0 && !logError ? (
+          <p className="log-empty">
+            No hazard entries yet. When the desktop app sees fire or smoke, they
+            appear here.
+          </p>
+        ) : (
+          <ul className="log-list">
+            {events.map((e, i) => (
+              <li key={`${e.ts}-${i}-${e.summary}`} className="log-item">
+                <time dateTime={e.iso}>{e.iso.replace('T', ' ').replace('Z', ' UTC')}</time>
+                <strong>{e.summary}</strong>
+                <span>({e.source.replace('_', ' ')})</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
       {connected && !error && (
         <p className="hint">
-          You will only see a screen here when fire or smoke is detected by the
-          monitoring system. Keep this page open or installed for the best
-          chance of receiving a warning in time.
+          Keep this page open or install it. Alerts also arrive instantly over the
+          live connection when the desktop app reports a detection.
         </p>
       )}
 
